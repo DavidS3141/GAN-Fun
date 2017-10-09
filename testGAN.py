@@ -141,6 +141,10 @@ i = 0
 G_losses= []
 D_losses = []
 
+for _ in range(10**3):
+    X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
+    _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
+
 for it in range(10**6):
     if it % 1e3 == 0:
         samples = sess.run(generator(tf.slice(Z, [0, 0], [16, 100])), feed_dict={Z: sample_Z(16, discriminator_batch*Z_dim)})
