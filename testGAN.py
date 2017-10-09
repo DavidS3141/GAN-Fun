@@ -153,10 +153,10 @@ for it in range(10**6):
         print('Model saved in file: %s' % save_path)
 
         i += 1
+    for _ in range(2):
+        X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
+        _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
-    X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
-
-    _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
     _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
     D_losses.append(D_loss_curr)
@@ -175,7 +175,7 @@ for it in range(10**6):
         plt.semilogy(x, avg-std, color='m')
         plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2))
         plt.legend()
-        plt.ylim((1e-2,1e1))
+        plt.ylim((1e-3,1e2))
         plt.savefig(export_dir+'evolution.png')
         plt.close()
         print('Iter: {}'.format(it))
