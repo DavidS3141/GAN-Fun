@@ -110,7 +110,7 @@ D_loss = (D_loss_real + D_loss_fake)/2
 G_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.ones_like(D_logit_fake)))
 
 D_solver = tf.train.AdamOptimizer().minimize(D_loss, var_list=theta_D)
-G_solver = tf.train.AdamOptimizer().minimize(G_loss, var_list=theta_G)
+G_solver = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(G_loss, var_list=theta_G)
 
 mb_size = 128
 Z_dim = 100
@@ -157,7 +157,7 @@ for it in range(10**6):
         print('Model saved in file: %s' % save_path)
 
         i += 1
-    for _ in range(2):
+    for _ in range(3):
         X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
         _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
