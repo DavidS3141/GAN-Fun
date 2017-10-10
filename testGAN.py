@@ -107,14 +107,17 @@ D_fake, D_logit_fake = discriminator(G_sample)
 D_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_real, labels=tf.ones_like(D_logit_real)))
 D_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.zeros_like(D_logit_fake)))
 D_loss = (D_loss_real + D_loss_fake)/2
-G_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.ones_like(D_logit_fake)))
+# G_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.ones_like(D_logit_fake)))
+G_loss = -D_loss_fake
 
-D_solver = tf.train.AdamOptimizer().minimize(D_loss, var_list=theta_D)
-G_solver = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(G_loss, var_list=theta_G)
+D_solver = tf.train.AdamOptimizer(learning_rate=1e-5).minimize(D_loss, var_list=theta_D)
+G_solver = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(G_loss, var_list=theta_G)
 
 mb_size = 128
 Z_dim = 100
-export_dir = 'out/%s/'%time.strftime('%Y%m%d-%H%M%S')
+readout_freq = 1e2
+
+export_dir = 'out/mnist/%s/'%time.strftime('%Y%m%d-%H%M%S')
 if os.path.exists(export_dir):
     print('Export path %s already exists!' % export_dir)
     quit()
@@ -129,7 +132,7 @@ for path in [export_dir, export_result, export_vars]:
 builder = tf.saved_model.builder.SavedModelBuilder(export_model)
 saver = tf.train.Saver(max_to_keep=None)
 
-mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+mnist = input_data.read_data_sets('data/MNIST_data', one_hot=True)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -141,12 +144,12 @@ i = 0
 G_losses= []
 D_losses = []
 
-for _ in range(10**3):
+for _ in range(1):
     X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
     _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
 for it in range(10**6):
-    if it % 1e3 == 0:
+    if it % readout_freq == 0:
         samples = sess.run(generator(tf.slice(Z, [0, 0], [16, 100])), feed_dict={Z: sample_Z(16, discriminator_batch*Z_dim)})
 
         fig = plot(samples)
@@ -157,29 +160,43 @@ for it in range(10**6):
         print('Model saved in file: %s' % save_path)
 
         i += 1
-    for _ in range(3):
+    while True:
         X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
         _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
-    _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
+        pD = 0.7
+        if D_loss_curr <= -pD*np.log(pD)-(1.-pD)*np.log(1.-pD):
+            break
+
+    for _ in range(1):
+        _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
     D_losses.append(D_loss_curr)
     G_losses.append(G_loss_curr)
 
-    if it % 1e3 == 0:
+    if it % readout_freq == 0:
+        fig = plt.figure()
+        gs = gridspec.GridSpec(2, 1)
+        gs.update(hspace=0.1)
+
+        ax = plt.subplot(gs[0])
         x, avg, std = condense_data(D_losses)
         plt.semilogy(np.arange(1, len(D_losses)+1), D_losses, label='discriminator loss', color='b')
         plt.semilogy(x, avg, color='r')
         plt.semilogy(x, avg+std, color='r')
         plt.semilogy(x, avg-std, color='r')
-        x, avg, std = condense_data(G_losses)
-        plt.semilogy(np.arange(1, len(G_losses)+1), G_losses, label='generator loss', color='g')
-        plt.semilogy(x, avg, color='m')
-        plt.semilogy(x, avg+std, color='m')
-        plt.semilogy(x, avg-std, color='m')
         plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2))
-        plt.legend()
-        plt.ylim((1e-3,1e2))
+        plt.ylim((1e-3,1e0))
+        plt.title('discriminator')
+        ax = plt.subplot(gs[1])
+        x, avg, std = condense_data(-np.array(G_losses))
+        plt.semilogy(np.arange(1, len(G_losses)+1), -np.array(G_losses), label='generator loss', color='b')
+        plt.semilogy(x, avg, color='r')
+        plt.semilogy(x, avg+std, color='r')
+        plt.semilogy(x, avg-std, color='r')
+        plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2))
+        plt.ylim((1e-3,1e0))
+        plt.title('generator')
         plt.savefig(export_dir+'evolution.png')
         plt.close()
         print('Iter: {}'.format(it))
