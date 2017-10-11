@@ -6,17 +6,33 @@ import matplotlib.gridspec as gridspec
 import os
 import time
 
+# Declare training constants
+mb_size = 128
+Z_dim = 100
+readout_freq = 1e2
+
+# Data export
+export_dir = 'out/mnist/%s/'%time.strftime('%Y%m%d-%H%M%S')
+if os.path.exists(export_dir):
+    print('Export path %s already exists!' % export_dir)
+    quit()
+export_model = export_dir+'model/'
+export_result = export_dir+'result/'
+export_vars = export_dir+'variables/'
+
+for path in [export_dir, export_result, export_vars]:
+    if not os.path.exists(path):
+        os.makedirs(path)
+
 
 def xavier_init(size):
     in_dim = size[0]
     xavier_stddev = 1. / tf.sqrt(in_dim / 2.)
     return tf.random_normal(shape=size, stddev=xavier_stddev)
 
-discriminator_batch = 1
+X = tf.placeholder(tf.float32, shape=[None, 784])
 
-X = tf.placeholder(tf.float32, shape=[None, discriminator_batch*784])
-
-D_W1 = tf.Variable(xavier_init([discriminator_batch*784, 2*128]))
+D_W1 = tf.Variable(xavier_init([784, 2*128]))
 D_b1 = tf.Variable(tf.zeros(shape=[2*128]))
 
 D_W2 = tf.Variable(xavier_init([2*128, 128]))
@@ -28,7 +44,7 @@ D_b3 = tf.Variable(tf.zeros(shape=[1]))
 theta_D = [D_W1, D_W2, D_W3, D_b1, D_b2, D_b3]
 
 
-Z = tf.placeholder(tf.float32, shape=[None, discriminator_batch*100])
+Z = tf.placeholder(tf.float32, shape=[None, 100])
 
 G_W1 = tf.Variable(xavier_init([100, 128]))
 G_b1 = tf.Variable(tf.zeros(shape=[128]))
@@ -38,10 +54,8 @@ G_b2 = tf.Variable(tf.zeros(shape=[784]))
 
 theta_G = [G_W1, G_W2, G_b1, G_b2]
 
-
 def sample_Z(m, n):
     return np.random.uniform(-1., 1., size=[m, n])
-
 
 def generator(z):
     G_h1 = tf.nn.relu(tf.matmul(z,G_W1) + G_b1)
@@ -50,7 +64,6 @@ def generator(z):
 
     return G_prob
 
-
 def discriminator(x):
     D_h1 = tf.nn.relu(tf.matmul(x, D_W1) + D_b1)
     D_h2 = tf.nn.relu(tf.matmul(D_h1, D_W2) + D_b2)
@@ -58,7 +71,6 @@ def discriminator(x):
     D_prob = tf.nn.sigmoid(D_logit)
 
     return D_prob, D_logit
-
 
 def plot(samples):
     fig = plt.figure(figsize=(4, 4))
@@ -94,8 +106,7 @@ def condense_data(data, num_points=100):
     np.append(std, np.std(rest))
     return x, avg, std
 
-Zlist = tf.split(Z, num_or_size_splits=discriminator_batch, axis=1)
-G_sample = tf.concat([generator(Zi) for Zi in Zlist],1)
+G_sample = generator(Z)
 D_real, D_logit_real = discriminator(X)
 D_fake, D_logit_fake = discriminator(G_sample)
 
@@ -110,24 +121,8 @@ D_loss = (D_loss_real + D_loss_fake)/2
 # G_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D_logit_fake, labels=tf.ones_like(D_logit_fake)))
 G_loss = -D_loss_fake
 
-D_solver = tf.train.AdamOptimizer(learning_rate=1e-5).minimize(D_loss, var_list=theta_D)
+D_solver = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(D_loss, var_list=theta_D)
 G_solver = tf.train.AdamOptimizer(learning_rate=1e-3).minimize(G_loss, var_list=theta_G)
-
-mb_size = 128
-Z_dim = 100
-readout_freq = 1e2
-
-export_dir = 'out/mnist/%s/'%time.strftime('%Y%m%d-%H%M%S')
-if os.path.exists(export_dir):
-    print('Export path %s already exists!' % export_dir)
-    quit()
-export_model = export_dir+'model/'
-export_result = export_dir+'result/'
-export_vars = export_dir+'variables/'
-
-for path in [export_dir, export_result, export_vars]:
-    if not os.path.exists(path):
-        os.makedirs(path)
 
 builder = tf.saved_model.builder.SavedModelBuilder(export_model)
 saver = tf.train.Saver(max_to_keep=None)
@@ -145,12 +140,12 @@ G_losses= []
 D_losses = []
 
 for _ in range(1):
-    X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
-    _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
+    X_mb = mnist.train.next_batch(mb_size)[0]
+    _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, Z_dim)})
 
 for it in range(10**6):
     if it % readout_freq == 0:
-        samples = sess.run(generator(tf.slice(Z, [0, 0], [16, 100])), feed_dict={Z: sample_Z(16, discriminator_batch*Z_dim)})
+        samples = sess.run(generator(tf.slice(Z, [0, 0], [16, 100])), feed_dict={Z: sample_Z(16, Z_dim)})
 
         fig = plot(samples)
         plt.savefig(export_result+'{}.png'.format(str(i).zfill(3)), bbox_inches='tight')
@@ -160,16 +155,22 @@ for it in range(10**6):
         print('Model saved in file: %s' % save_path)
 
         i += 1
-    while True:
-        X_mb = np.concatenate([mnist.train.next_batch(mb_size)[0] for _ in range(discriminator_batch)], 1)
-        _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
 
-        pD = 0.7
+    while True:
+        X_mb = mnist.train.next_batch(mb_size)[0]
+        _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={X: X_mb, Z: sample_Z(mb_size, Z_dim)})
+
+        pD = 0.5
         if D_loss_curr <= -pD*np.log(pD)-(1.-pD)*np.log(1.-pD):
             break
 
-    for _ in range(1):
-        _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={Z: sample_Z(mb_size, discriminator_batch*Z_dim)})
+    while True:
+        _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={Z: sample_Z(mb_size, Z_dim)})
+
+        pG = 0.5
+        if G_loss_curr <= pG*np.log(pG)+(1.-pG)*np.log(1.-pG):
+            break
+
 
     D_losses.append(D_loss_curr)
     G_losses.append(G_loss_curr)
@@ -177,7 +178,7 @@ for it in range(10**6):
     if it % readout_freq == 0:
         fig = plt.figure()
         gs = gridspec.GridSpec(2, 1)
-        gs.update(hspace=0.1)
+        gs.update(hspace=0.3)
 
         ax = plt.subplot(gs[0])
         x, avg, std = condense_data(D_losses)
