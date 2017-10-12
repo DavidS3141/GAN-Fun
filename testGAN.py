@@ -9,7 +9,7 @@ import time
 # Declare training constants
 mb_size = 128
 Z_dim = 100
-readout_freq = 10**3
+readout_freq = 10**2
 
 # Data export
 export_dir = 'out/mnist/%s/'%time.strftime('%Y%m%d-%H%M%S')
@@ -46,16 +46,17 @@ theta_D = [D_W1, D_W2, D_W3, D_b1, D_b2, D_b3]
 
 Z = tf.placeholder(tf.float32, shape=[None, 100], name='Z')
 
-G_W1 = tf.Variable(xavier_init([100, 128]))
-G_b1 = tf.Variable(tf.zeros(shape=[128]))
+#G_W1 = tf.Variable(xavier_init([100, 128]))
+#G_b1 = tf.Variable(tf.zeros(shape=[128]))
 
-G_W2 = tf.Variable(xavier_init([128,256]))
+G_W2 = tf.Variable(xavier_init([100,256]))
 G_b2 = tf.Variable(tf.zeros(shape=[256]))
 
 G_W3 = tf.Variable(xavier_init([256,784]))
 G_b3 = tf.Variable(tf.zeros(shape=[784]))
 
-theta_G = [G_W1, G_W2, G_W3, G_b1, G_b2, G_b3]
+#theta_G = [G_W1, G_W2, G_W3, G_b1, G_b2, G_b3]
+theta_G = [G_W2, G_W3, G_b2, G_b3]
 
 noise_sigma = tf.placeholder(tf.float32, shape=[None, 784], name='noise_sigma')
 
@@ -63,8 +64,8 @@ def sample_Z(m, n):
     return np.random.uniform(-1., 1., size=[m, n])
 
 def generator(z):
-    G_h1 = tf.nn.relu(tf.matmul(z, G_W1) + G_b1)
-    G_h2 = tf.nn.relu(tf.matmul(G_h1, G_W2) + G_b2)
+    #G_h1 = tf.nn.relu(tf.matmul(z, G_W1) + G_b1)
+    G_h2 = tf.nn.relu(tf.matmul(z, G_W2) + G_b2)
     G_log_prob = tf.matmul(G_h2, G_W3) + G_b3
     G_prob = tf.nn.sigmoid(G_log_prob)
 
@@ -146,14 +147,13 @@ builder.save(as_text=True)
 i = 0
 G_losses= []
 D_losses = []
-noise_level = 0.5
-
-for _ in range(0):
-    X_mb = mnist.train.next_batch(mb_size)[0]
-    _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={noise_sigma:noise_level*np.ones_like(X_mb), X: X_mb, Z: sample_Z(mb_size, Z_dim)})
+noises = []
+G_loss_curr = np.log(0.5)
+D_loss_curr = np.log(2)
+noise_level = 1.
 
 for it in range(readout_freq*10**3):
-    noise_level = noise_level*0.99998
+    noise_level = noise_level*0.99995
     if it % readout_freq == 0:
         samples = sess.run(generator(Z), feed_dict={Z: sample_Z(16, Z_dim)})
 
@@ -167,10 +167,13 @@ for it in range(readout_freq*10**3):
 
         i += 1
 
-    D_loss_curr_old = -1
+    D_loss_curr_old = 100
     while True:
         X_mb = mnist.train.next_batch(mb_size)[0]
         _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={noise_sigma:noise_level*np.ones_like(X_mb), X: X_mb, Z: sample_Z(mb_size, Z_dim)})
+        D_losses.append(D_loss_curr)
+        G_losses.append(G_loss_curr)
+        noises.append(noise_level)
 
         if D_loss_curr_old<D_loss_curr:
             break
@@ -181,19 +184,19 @@ for it in range(readout_freq*10**3):
 
     while True:
         _, G_loss_curr = sess.run([G_solver, G_loss], feed_dict={noise_sigma:noise_level*np.ones_like(X_mb), Z: sample_Z(mb_size, Z_dim)})
+        D_losses.append(D_loss_curr)
+        G_losses.append(G_loss_curr)
+        noises.append(noise_level)
 
+        break
         pG = 0.5
-        if G_loss_curr <= pG*np.log(pG)+(1.-pG)*np.log(1.-pG) or True:
+        if G_loss_curr <= pG*np.log(pG)+(1.-pG)*np.log(1.-pG):
             break
-
-
-    D_losses.append(D_loss_curr)
-    G_losses.append(G_loss_curr)
 
     if it % readout_freq == 0:
         fig = plt.figure()
-        gs = gridspec.GridSpec(2, 1)
-        gs.update(hspace=0.3)
+        gs = gridspec.GridSpec(3, 1)
+        gs.update(hspace=0.6)
 
         ax = plt.subplot(gs[0])
         x, avg, std = condense_data(D_losses)
@@ -201,7 +204,7 @@ for it in range(readout_freq*10**3):
         plt.semilogy(x, avg, color='r')
         plt.semilogy(x, avg+std, color='r')
         plt.semilogy(x, avg-std, color='r')
-        plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2))
+        plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2), color='k')
         plt.ylim((1e-2,1e0))
         plt.title('discriminator')
         ax = plt.subplot(gs[1])
@@ -210,9 +213,12 @@ for it in range(readout_freq*10**3):
         plt.semilogy(x, avg, color='r')
         plt.semilogy(x, avg+std, color='r')
         plt.semilogy(x, avg-std, color='r')
-        plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2))
+        plt.semilogy(np.arange(1, len(G_losses)+1), np.ones_like(D_losses)*np.log(2), color='k')
         plt.ylim((1e-2,1e0))
         plt.title('generator')
+        ax = plt.subplot(gs[2])
+        plt.semilogy(range(1,len(noises)+1), noises, label='noise level')
+        plt.title('noise level')
         plt.savefig(export_dir+'evolution.png')
         plt.close()
         print('Iter: {}'.format(it))
