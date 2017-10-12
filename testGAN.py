@@ -46,17 +46,17 @@ theta_D = [D_W1, D_W2, D_W3, D_b1, D_b2, D_b3]
 
 Z = tf.placeholder(tf.float32, shape=[None, 100], name='Z')
 
-#G_W1 = tf.Variable(xavier_init([100, 128]))
-#G_b1 = tf.Variable(tf.zeros(shape=[128]))
+G_W1 = tf.Variable(xavier_init([100, 128]))
+G_b1 = tf.Variable(tf.zeros(shape=[128]))
 
-G_W2 = tf.Variable(xavier_init([100,256]))
+G_W2 = tf.Variable(xavier_init([128,256]))
 G_b2 = tf.Variable(tf.zeros(shape=[256]))
 
 G_W3 = tf.Variable(xavier_init([256,784]))
 G_b3 = tf.Variable(tf.zeros(shape=[784]))
 
-#theta_G = [G_W1, G_W2, G_W3, G_b1, G_b2, G_b3]
-theta_G = [G_W2, G_W3, G_b2, G_b3]
+theta_G = [G_W1, G_W2, G_W3, G_b1, G_b2, G_b3]
+#theta_G = [G_W2, G_W3, G_b2, G_b3]
 
 noise_sigma = tf.placeholder(tf.float32, shape=[None, 784], name='noise_sigma')
 
@@ -64,8 +64,8 @@ def sample_Z(m, n):
     return np.random.uniform(-1., 1., size=[m, n])
 
 def generator(z):
-    #G_h1 = tf.nn.relu(tf.matmul(z, G_W1) + G_b1)
-    G_h2 = tf.nn.relu(tf.matmul(z, G_W2) + G_b2)
+    G_h1 = tf.nn.relu(tf.matmul(z, G_W1) + G_b1)
+    G_h2 = tf.nn.relu(tf.matmul(G_h1, G_W2) + G_b2)
     G_log_prob = tf.matmul(G_h2, G_W3) + G_b3
     G_prob = tf.nn.sigmoid(G_log_prob)
 
@@ -79,6 +79,10 @@ def discriminator(x):
     D_prob = tf.nn.sigmoid(D_logit)
 
     return D_prob, D_logit
+
+def converged(values):
+    if len(values)<10: return False
+    return np.argmin(values[-10:])==0
 
 def plot(samples):
     fig = plt.figure(figsize=(4, 4))
@@ -150,10 +154,10 @@ D_losses = []
 noises = []
 G_loss_curr = np.log(0.5)
 D_loss_curr = np.log(2)
-noise_level = 1.
+noise_level = 1.5
 
 for it in range(readout_freq*10**3):
-    noise_level = noise_level*0.99995
+    noise_level = noise_level*0.9999
     if it % readout_freq == 0:
         samples = sess.run(generator(Z), feed_dict={Z: sample_Z(16, Z_dim)})
 
@@ -168,14 +172,18 @@ for it in range(readout_freq*10**3):
         i += 1
 
     D_loss_curr_old = 100
+    D_train_counter = 0
     while True:
         X_mb = mnist.train.next_batch(mb_size)[0]
         _, D_loss_curr = sess.run([D_solver, D_loss], feed_dict={noise_sigma:noise_level*np.ones_like(X_mb), X: X_mb, Z: sample_Z(mb_size, Z_dim)})
         D_losses.append(D_loss_curr)
         G_losses.append(G_loss_curr)
         noises.append(noise_level)
+        D_train_counter += 1
 
-        if D_loss_curr_old<D_loss_curr:
+        if converged(D_losses[-D_train_counter:]):
+            break
+        #if D_loss_curr_old<D_loss_curr:# and abs(D_loss_curr_old-D_loss_curr)<1e-6:
             break
         D_loss_curr_old = D_loss_curr
         #pD = 0.95
